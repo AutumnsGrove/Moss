@@ -12,7 +12,7 @@
 
 import type { Env, QueueMessageBody } from "./shared/env";
 import { handleGatewayRequest } from "./gateway/index";
-import { processAgentMessage } from "./agent/index";
+import { processAgentMessage, processModelCommand } from "./agent/index";
 import { processMemoryWrite } from "./memory/index";
 import { handleScheduledEvent } from "./scheduler/index";
 import { logError, safeJsonParse } from "./shared/utils";
@@ -43,6 +43,12 @@ export default {
               body.text,
               body.messageId
             );
+            break;
+
+          case "command":
+            if (body.command === "model") {
+              await processModelCommand(env, body.chatId, body.args);
+            }
             break;
 
           case "memory_write":

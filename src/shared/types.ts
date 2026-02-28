@@ -231,6 +231,93 @@ export interface ChatCompletionResponse {
   };
 }
 
+// ─── Modal Types ───
+
+export interface ModalTriageRequest {
+  message: string;
+  memory_context: string;
+  available_tools: string[];
+  conversation_history: ChatMessage[];
+}
+
+export interface ModalTriageResponse {
+  intent: string;
+  complexity: string;
+  tools_needed: string[];
+  route_to: string;
+  confidence: number;
+}
+
+export interface ModalExecuteRequest {
+  message: string;
+  triage: TriageResult;
+  memory_context: string;
+  tools: LLMToolDefinition[];
+  tool_results: ModalToolResult[];
+  round_number: number;
+}
+
+export interface ModalToolResult {
+  name: string;
+  result: ToolResult;
+}
+
+export interface ModalExecuteResponse {
+  tool_calls: ToolCall[];
+  done: boolean;
+  summary: string;
+}
+
+export interface ModalVisionRequest {
+  image_base64: string;
+  caption: string;
+  memory_context: string;
+}
+
+export interface ModalVisionResponse {
+  description: string;
+  objects: string[];
+  text_content: string;
+  analysis: string;
+}
+
+export interface ModalMemoryExtractionRequest {
+  transcript: string;
+}
+
+export interface ModalMemoryExtractionResponse {
+  facts: Array<{
+    content: string;
+    confidence: "confirmed" | "inferred";
+    needs_confirmation: boolean;
+  }>;
+  episode_summary: string;
+  mood_signal: string | null;
+  core_block_updates: Array<{
+    field: string;
+    value: string;
+    reason: string;
+  }>;
+}
+
+export interface ModalHealthResponse {
+  status: string;
+  text_model: string;
+  vision_model: string;
+  gpu: string;
+  uptime_seconds: number;
+}
+
+// ─── Progress Log Types ───
+
+export interface ProgressEntry {
+  type: "triage" | "tool_call" | "tool_result" | "done" | "error";
+  tool_name?: string;
+  result_summary?: string;
+  duration_ms?: number;
+  error_message?: string;
+}
+
 // ─── Error Types ───
 
 export interface MossError {
