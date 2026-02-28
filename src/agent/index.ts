@@ -1,20 +1,33 @@
 /**
  * moss-agent: Message processing and LLM orchestration.
  *
- * Flow:
- * 1. Load memory context (Core Blocks + episodes + facts)
- * 2. Tier 1 triage (LFM — intent, complexity, routing)
- * 3. Route: simple_response (LFM handles) or full_agent (Tier 2 + tools)
- * 4. Send response via Telegram
- * 5. Store conversation for async memory extraction
+ * Two flows:
+ * - Chat flow: triage → conversational model → single response (no ack, no log)
+ * - Work flow: triage → ack → executor (Modal + tools) → progress log → final response
+ *
+ * The triage layer (Modal) decides which flow fires.
  */
 
 import type { Env } from "../shared/env";
 import { buildMemoryContext } from "../shared/memory";
-import { sendMessage } from "../shared/telegram";
+import {
+  sendMessage,
+  sendMessageWithId,
+  sendTypingAction,
+} from "../shared/telegram";
+import { conversationalResponse } from "../shared/providers";
 import { generateId, now, logError, truncate } from "../shared/utils";
-import { triageMessage, handleSimpleResponse } from "./triage";
-import { executeAgentTurn } from "./executor";
+import { triageMessage, handleChatFlow } from "./triage";
+import { executeWorkFlow, generateAcknowledgment } from "./executor";
+
+const MOSS_SYSTEM_PROMPT = `You are Moss, a personal AI assistant for Autumn. You live inside Cloudflare's infrastructure and communicate via Telegram.
+
+Personality:
+- Conversational, warm, like a knowledgeable friend texting
+- High technical depth — do not simplify unless asked
+- One thing at a time, ADHD-friendly pacing
+- No bullet walls — use prose
+- Honest pushback when needed`;
 
 /**
  * Process a message from the queue.
@@ -30,43 +43,122 @@ export async function processAgentMessage(
     // Step 1: Load memory context
     const memory = await buildMemoryContext(env, text);
 
-    // Step 2: Tier 1 triage
+    // Step 2: Triage via Modal (falls back to OpenRouter)
     const triage = await triageMessage(env, text, memory);
 
-    // Step 3: Generate response based on routing decision
-    let response: string;
-
+    // Step 3: Route based on triage decision
     if (triage.route_to === "simple_response") {
-      response = await handleSimpleResponse(env, text, memory);
+      // ─── Chat Flow ───
+      // No ack, no progress log. Just a natural response.
+      await sendTypingAction(env.TELEGRAM_BOT_TOKEN, chatId);
+
+      const response = await handleChatFlow(env, text, memory);
+
+      await sendMessage(env.TELEGRAM_BOT_TOKEN, {
+        chatId,
+        text: truncate(response, 4000),
+        parseMode: "MarkdownV2",
+        replyToMessageId: messageId,
+      });
+
+      await storeConversation(env, text, response);
     } else {
-      response = await executeAgentTurn(env, text, memory, triage);
+      // ─── Work Flow ───
+      // Ack → executor (tools + progress log) → final response
+
+      // Message 1: Acknowledgment (specific to what we're about to do)
+      const ack = await generateAcknowledgment(env, text, triage);
+      await sendMessage(env.TELEGRAM_BOT_TOKEN, {
+        chatId,
+        text: ack,
+        replyToMessageId: messageId,
+      });
+
+      // Message 2: Progress log (created by executor, edited in real-time)
+      // Message 3: Final response
+      const { response } = await executeWorkFlow(
+        env,
+        chatId,
+        text,
+        memory,
+        triage
+      );
+
+      await sendMessage(env.TELEGRAM_BOT_TOKEN, {
+        chatId,
+        text: truncate(response, 4000),
+        parseMode: "MarkdownV2",
+      });
+
+      await storeConversation(env, text, response);
     }
-
-    // Step 4: Send response via Telegram
-    await sendMessage(env.TELEGRAM_BOT_TOKEN, {
-      chatId,
-      text: truncate(response, 4000), // Telegram message limit
-      parseMode: "MarkdownV2",
-      replyToMessageId: messageId,
-    });
-
-    // Step 5: Store conversation for async memory extraction
-    await storeConversation(env, text, response);
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown agent error";
-    await logError(env.DB, message, "agent");
+    const errorMsg = err instanceof Error ? err.message : "Unknown agent error";
+    await logError(env.DB, errorMsg, "agent");
 
-    // Send a generic error message — never expose internals
-    await sendMessage(env.TELEGRAM_BOT_TOKEN, {
-      chatId,
-      text: "Something went sideways. I logged the error — try again in a moment.",
-    });
+    // Pass error to conversational model for natural explanation
+    try {
+      const errorResponse = await conversationalResponse(env, [
+        { role: "system", content: MOSS_SYSTEM_PROMPT },
+        { role: "user", content: text },
+        {
+          role: "system",
+          content: `An error occurred while processing: ${errorMsg}. Explain this to the user naturally and suggest next steps. Do not expose technical details.`,
+        },
+      ]);
+
+      await sendMessage(env.TELEGRAM_BOT_TOKEN, {
+        chatId,
+        text: errorResponse || "Something went sideways. I logged the error — try again in a moment.",
+      });
+    } catch {
+      // If even the error response fails, send a simple fallback
+      await sendMessage(env.TELEGRAM_BOT_TOKEN, {
+        chatId,
+        text: "Something went sideways. I logged the error — try again in a moment.",
+      });
+    }
   }
 }
 
 /**
+ * Process a /model command from the user.
+ */
+export async function processModelCommand(
+  env: Env,
+  chatId: number,
+  args: string
+): Promise<void> {
+  const { setConversationalModel, getCurrentModelDisplay } = await import(
+    "../shared/providers"
+  );
+
+  if (!args.trim()) {
+    const current = await getCurrentModelDisplay(env.KV);
+    await sendMessage(env.TELEGRAM_BOT_TOKEN, {
+      chatId,
+      text: `Current model: ${current}\n\nAvailable: minimax, claude, kimi`,
+    });
+    return;
+  }
+
+  const result = await setConversationalModel(env.KV, args);
+  if (!result) {
+    await sendMessage(env.TELEGRAM_BOT_TOKEN, {
+      chatId,
+      text: `Unknown model "${args}". Available: minimax, claude, kimi`,
+    });
+    return;
+  }
+
+  await sendMessage(env.TELEGRAM_BOT_TOKEN, {
+    chatId,
+    text: `Switched to ${result.display}.`,
+  });
+}
+
+/**
  * Store the conversation exchange for later memory extraction.
- * The memory-writer worker will process this asynchronously.
  */
 async function storeConversation(
   env: Env,

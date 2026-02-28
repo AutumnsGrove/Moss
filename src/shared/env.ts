@@ -16,6 +16,11 @@ export interface Env {
   GITHUB_PAT_WRITE: string;
   HEARTWOOD_SERVICE_TOKEN: string;
 
+  // --- Modal Secrets ---
+  MODAL_ENDPOINT_URL: string;
+  MODAL_AUTH_KEY: string;
+  MODAL_AUTH_SECRET: string;
+
   // --- Config ---
   OWNER_TELEGRAM_ID: string;
   ENVIRONMENT: string;
@@ -24,4 +29,5 @@ export interface Env {
 /** Queue message types for routing within the queue consumer */
 export type QueueMessageBody =
   | { type: "agent"; chatId: number; text: string; messageId: number }
+  | { type: "command"; chatId: number; command: string; args: string }
   | { type: "memory_write"; conversationId: string };

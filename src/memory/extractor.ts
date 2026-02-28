@@ -1,10 +1,18 @@
 /**
  * Memory extraction from conversations.
- * Uses LFM to extract facts, episode summaries, and core block updates.
+ *
+ * Primary: Modal (LFM on your own GPU)
+ * Fallback: OpenRouter (LFM2-24B-A2B, degraded mode)
+ *
+ * Extracts facts, episode summaries, mood signals, and core block update proposals.
  */
 
 import type { Env } from "../shared/env";
-import type { ConversationMessage } from "../shared/types";
+import type {
+  ConversationMessage,
+  ModalMemoryExtractionResponse,
+} from "../shared/types";
+import { extractMemoryViaModal } from "../shared/providers";
 import { chatCompletion, Models } from "../shared/openrouter";
 import { generateId, now, safeJsonParse } from "../shared/utils";
 
@@ -31,54 +39,68 @@ Rules:
 - Be conservative — fewer high-quality extractions beat many low-quality ones
 - Health/mood observations: ALWAYS set needs_confirmation: true`;
 
-interface ExtractionResult {
-  facts: Array<{
-    content: string;
-    confidence: "confirmed" | "inferred";
-    needs_confirmation: boolean;
-  }>;
-  episode_summary: string;
-  mood_signal: string | null;
-  core_block_updates: Array<{
-    field: string;
-    value: string;
-    reason: string;
-  }>;
-}
-
 /**
  * Extract memory artifacts from a conversation transcript.
+ * Uses Modal first, falls back to OpenRouter.
  */
 export async function extractMemory(
   env: Env,
   messages: ConversationMessage[]
 ): Promise<void> {
-  // Format the transcript
   const transcript = messages
     .map((m) => `${m.role}: ${m.content}`)
     .join("\n\n");
 
-  // Call LFM for extraction
-  const response = await chatCompletion(env.OPENROUTER_API_KEY, {
-    model: Models.TRIAGE,
-    messages: [
-      { role: "system", content: EXTRACTION_PROMPT },
-      { role: "user", content: `Transcript:\n\n${transcript}` },
-    ],
-    temperature: 0.1,
-    max_tokens: 1024,
-  });
+  // Try Modal first, fall back to OpenRouter
+  const result = await extractViaModalOrFallback(env, transcript);
+  if (!result || (!result.facts.length && !result.episode_summary)) return;
 
-  const content = response.choices[0]?.message?.content;
-  if (!content) return;
+  await storeExtractionResults(env, result);
+}
 
-  const jsonStr = content.replace(/```json?\n?/g, "").replace(/```/g, "").trim();
-  const result = safeJsonParse<ExtractionResult>(jsonStr);
-  if (!result) return;
+/**
+ * Extract via Modal, with OpenRouter fallback.
+ */
+async function extractViaModalOrFallback(
+  env: Env,
+  transcript: string
+): Promise<ModalMemoryExtractionResponse | null> {
+  // Try Modal first
+  const modalResult = await extractMemoryViaModal(env, transcript);
+  if (modalResult.facts.length > 0 || modalResult.episode_summary) {
+    return modalResult;
+  }
 
+  // Fallback to OpenRouter
+  try {
+    const response = await chatCompletion(env.OPENROUTER_API_KEY, {
+      model: Models.TRIAGE,
+      messages: [
+        { role: "system", content: EXTRACTION_PROMPT },
+        { role: "user", content: `Transcript:\n\n${transcript}` },
+      ],
+      temperature: 0.1,
+      max_tokens: 1024,
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) return null;
+
+    const jsonStr = content.replace(/```json?\n?/g, "").replace(/```/g, "").trim();
+    return safeJsonParse<ModalMemoryExtractionResponse>(jsonStr);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Store extraction results in D1.
+ */
+async function storeExtractionResults(
+  env: Env,
+  result: ModalMemoryExtractionResponse
+): Promise<void> {
   const timestamp = now();
-
-  // Batch all DB writes using D1's batch API for performance
   const statements: D1PreparedStatement[] = [];
 
   // Store confirmed facts immediately
@@ -102,9 +124,7 @@ export async function extractMemory(
     );
   }
 
-  // Inferred facts that need confirmation are held — they'll be sent as
-  // confirmation requests in a future message. For v1, we store them as
-  // inferred with a flag for the agent to ask about later.
+  // Inferred facts stored with pending_confirmation source
   const inferredFacts = result.facts.filter((f) => f.needs_confirmation);
   for (const fact of inferredFacts) {
     statements.push(
@@ -115,11 +135,7 @@ export async function extractMemory(
     );
   }
 
-  // Execute all inserts in a single batch (one round-trip to D1)
   if (statements.length > 0) {
     await env.DB.batch(statements);
   }
-
-  // Core block updates are logged but not applied — owner must confirm
-  // Future: send confirmation message via Telegram
 }

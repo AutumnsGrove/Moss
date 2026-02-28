@@ -217,6 +217,13 @@ const TOOL_DEFINITIONS: Record<string, LLMToolDefinition> = {
 };
 
 /**
+ * Get all registered tool names.
+ */
+export function getToolNames(): string[] {
+  return Object.keys(TOOL_HANDLERS);
+}
+
+/**
  * Get LLM tool definitions filtered to what the triage layer says is needed.
  * If no specific tools requested, return all definitions.
  */

@@ -8,7 +8,7 @@ import type { TelegramUpdate } from "../shared/types";
 import { sendTypingAction } from "../shared/telegram";
 
 export interface RouteDecision {
-  action: "process" | "queue" | "drop";
+  action: "process" | "queue" | "command" | "drop";
   chatId?: number;
   text?: string;
   messageId?: number;
@@ -42,6 +42,17 @@ export function routeUpdate(
     ? message.text.slice(0, MAX_MESSAGE_LENGTH)
     : message.text;
 
+  // Check for /model command
+  if (text.startsWith("/model")) {
+    const args = text.slice("/model".length).trim();
+    return {
+      action: "command",
+      chatId: message.chat.id,
+      text: args,
+      messageId: message.message_id,
+    };
+  }
+
   // Valid message from owner — queue for processing
   return {
     action: "queue",
@@ -59,10 +70,24 @@ export async function enqueueForAgent(
   env: Env,
   decision: RouteDecision
 ): Promise<void> {
-  if (!decision.chatId || !decision.text || !decision.messageId) return;
+  if (!decision.chatId) return;
 
   // Show typing indicator immediately
   await sendTypingAction(env.TELEGRAM_BOT_TOKEN, decision.chatId);
+
+  if (decision.action === "command") {
+    // Route command messages directly
+    const body: QueueMessageBody = {
+      type: "command",
+      chatId: decision.chatId,
+      command: "model",
+      args: decision.text ?? "",
+    };
+    await env.QUEUE.send(body);
+    return;
+  }
+
+  if (!decision.text || !decision.messageId) return;
 
   // Enqueue for agent worker
   const body: QueueMessageBody = {

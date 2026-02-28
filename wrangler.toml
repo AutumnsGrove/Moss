@@ -34,6 +34,8 @@ crons = [
 ]
 
 # Environment variables (non-secret defaults)
+# Modal secrets (MODAL_ENDPOINT_URL, MODAL_AUTH_KEY, MODAL_AUTH_SECRET) are stored
+# as CF Secrets via `wrangler secret put` — never in this file.
 [vars]
 ENVIRONMENT = "production"
 
