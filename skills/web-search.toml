@@ -1,0 +1,23 @@
+[skill]
+name        = "web-search"
+description = "Search the web for current information via Tavily"
+version     = "1.0.0"
+author      = "autumnsgrove"
+
+[trigger]
+keywords    = ["search", "look up", "find", "what's", "current", "news", "latest"]
+intents     = ["web_search", "research", "fact_check"]
+
+[integration]
+type        = "mcp"
+server_url  = "https://mcp.tavily.com/mcp/?tavilyApiKey={{TAVILY_API_KEY}}"
+tools       = ["tavily_search", "tavily_extract"]
+
+[permissions]
+network      = true
+memory_write = false
+cost_class   = "low"
+
+[limits]
+max_calls_per_conversation = 5
+timeout_ms  = 8000
