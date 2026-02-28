@@ -7,12 +7,12 @@ compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
 binding = "DB"
 database_name = "moss-db"
-database_id = "PLACEHOLDER_D1_ID"
+database_id = "9e3895bc-0035-4cca-8aa0-fc78449a4eb9"
 
 # KV Namespace
 [[kv_namespaces]]
 binding = "KV"
-id = "PLACEHOLDER_KV_ID"
+id = "361174d7af9b48e9b839a8e340be7e46"
 
 # Queue Producer (gateway enqueues messages for async processing)
 [[queues.producers]]
