@@ -5,17 +5,31 @@
 ---
 
 ## Project Purpose
-[Fill in: What this project does - 1-2 sentences]
+
+Moss is a thin, auditable, personally-owned AI assistant that lives entirely inside Cloudflare's infrastructure. It communicates via Telegram, manages tasks with proactive reminders, tracks memory over time, and integrates with GitHub and the Grove ecosystem (grove.place).
 
 ## Tech Stack
-[Fill in: Technologies, frameworks, and languages used]
-- Language:
-- Framework:
-- Key Libraries:
-- Package Manager:
+
+- **Language:** TypeScript (Cloudflare Workers)
+- **Runtime:** Cloudflare Workers (stateless compute)
+- **Storage:** Cloudflare D1 (SQLite), KV (config/registry), Vectorize (semantic search), R2 (future: attachments)
+- **Async:** Cloudflare Queues (fire-and-forget jobs), Cron Triggers (scheduled tasks)
+- **LLM:** OpenRouter (ZDR-enabled) — LFM2-24B-A2B (triage), Claude Sonnet / MiniMax M2.5 / Kimi K2.5 (execution)
+- **Channel:** Telegram Bot API (webhook-driven)
+- **Package Manager:** pnpm
+- **Deploy:** Wrangler CLI
+- **Grove Dependencies:** Heartwood (auth), Threshold (rate limiting), Lattice SDK (CF primitives)
 
 ## Architecture Notes
-[Fill in: Key architectural decisions, patterns, or structure]
+
+- **Stateless compute, stateful storage** — no persistent process, no VPS, no daemon. Workers fire on events and exit.
+- **Four Workers:** `moss-gateway` (auth/route), `moss-agent` (LLM/tools), `moss-scheduler` (cron/reminders), `moss-memory-writer` (async memory extraction)
+- **Two-tier LLM:** LFM2-24B-A2B triages every message (intent/routing), expensive models only fire when needed
+- **Three-layer memory:** Core Blocks (KV, always in context), Episodic Memory (D1, conversation summaries), Fact Store (D1 + Vectorize, semantic search)
+- **Skills are TOML manifests, not code** — auditable, git-tracked, no arbitrary execution
+- **Owner-only** — Telegram sender ID allowlist, unknown senders silently dropped
+- **ZDR on every LLM call** — `X-No-Data-Logging: true` set at HTTP client level, non-negotiable
+- **See `docs/Moss-Spec.md`** for the full architecture specification
 
 ---
 

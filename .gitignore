@@ -1,4 +1,36 @@
+# Secrets
 secrets.json
-*.log
+.env
+.env.*
+.dev.vars
+
+# Cloudflare
+.wrangler/
+.mf/
+
+# Node
+node_modules/
+dist/
+.turbo/
+
+# TypeScript
+*.tsbuildinfo
+
+# Python (tools)
 __pycache__/
+*.pyc
+.venv/
+
+# OS
 .DS_Store
+*.log
+Thumbs.db
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# Misc
+*.tmp
+baseproject-update-summary.md
+.baseproject-backup-*/
