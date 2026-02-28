@@ -1,0 +1,54 @@
+name = "moss"
+main = "src/index.ts"
+compatibility_date = "2025-02-24"
+compatibility_flags = ["nodejs_compat"]
+
+# D1 Database
+[[d1_databases]]
+binding = "DB"
+database_name = "moss-db"
+database_id = "PLACEHOLDER_D1_ID"
+
+# KV Namespace
+[[kv_namespaces]]
+binding = "KV"
+id = "PLACEHOLDER_KV_ID"
+
+# Queue Producer (gateway enqueues messages for async processing)
+[[queues.producers]]
+binding = "QUEUE"
+queue = "moss-queue"
+
+# Queue Consumer (agent processes messages from queue)
+[[queues.consumers]]
+queue = "moss-queue"
+max_batch_size = 1
+max_retries = 3
+dead_letter_queue = "moss-dlq"
+
+# Cron Triggers (scheduler)
+[triggers]
+crons = [
+  "0 13 * * *",    # 9am ET daily digest (UTC 13:00 = ET 09:00 during EDT)
+  "*/15 13-3 * * *" # Every 15 min during waking hours (9am-11pm ET)
+]
+
+# Environment variables (non-secret defaults)
+[vars]
+ENVIRONMENT = "production"
+
+# Development overrides
+[env.dev]
+name = "moss-dev"
+
+[env.dev.vars]
+ENVIRONMENT = "development"
+
+[[env.dev.d1_databases]]
+binding = "DB"
+database_name = "moss-db-dev"
+database_id = "PLACEHOLDER_D1_DEV_ID"
+
+[[env.dev.kv_namespaces]]
+binding = "KV"
+id = "PLACEHOLDER_KV_DEV_ID"
